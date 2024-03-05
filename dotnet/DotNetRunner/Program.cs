@@ -15,6 +15,7 @@ namespace DotNetRunner
     class MainClass
     {
         static string exportUrl = "https://localhost:44355/export";
+        static string analyzerUrl = "https://localhost:44355/analyzer";
         public static async Task Main(string[] args)
         {
             CreateJsonForConsoleRunner();
@@ -106,6 +107,58 @@ namespace DotNetRunner
             });
             await CreatePdfFromReport("the_dotnet_dataset_report_with_params_and_subreport.rpt", "report_with_empty_subreport_datatable.pdf", emptySubreportData);
 
+            var analyzerReportName = "the_dotnet_dataset_report_with_params_and_subreport.rpt";
+            using (var client = new HttpClient())
+            {
+                await ReportStream(
+                    "the_dotnet_dataset_report_with_params_and_subreport.rpt",
+                    stream => TestAnalyzer(stream, client)
+                );
+            }
+        }
+
+        private static async Task TestAnalyzer(Stream report, HttpClient httpClient)
+        {
+            var analyzer = new ReportAnalyzer(report, httpClient, "user", "password", analyzerUrl);
+            //var existingSubreport = subreportParameterData.SubReportDataTables.First();
+            //var subreportName = existingSubreport.ReportName;
+            /*var hasSubreport = analyzer.hasSubreport();
+            */
+
+            var reportAnalysis = await analyzer.FullAnalysis();
+
+            if (!reportAnalysis.HasSubReport())
+            {
+                throw new Exception($"Report does not have subreport.");
+            }
+
+            if (!reportAnalysis.DataTables.First(
+                    t => string.Equals(t.DataTableName, "employee", StringComparison.OrdinalIgnoreCase)
+                )
+                .ColumnNames
+                .Contains("EMPLOYEE_ID", StringComparer.OrdinalIgnoreCase))
+            {
+                throw new Exception($"Report does not have 'Employee' datatable field 'EMPLOYEE_ID'.");
+            }
+
+            if (!reportAnalysis.SubReports
+                .First(s => string.Equals(s.SubreportName, "the_dotnet_dataset_report_with_params", StringComparison.OrdinalIgnoreCase))
+                .DataTables.First(t => string.Equals(t.DataTableName, "employee", StringComparison.OrdinalIgnoreCase))
+                .ColumnNames
+                .Contains("EMPLOYEE_ID"))
+            {
+                throw new Exception($"Report does not have subreport datatable field.");
+            }
+
+            if (!reportAnalysis.SubReports
+                .First(s => string.Equals(s.SubreportName, "the_dotnet_dataset_report_with_params", StringComparison.OrdinalIgnoreCase))
+                .Parameters
+                .Contains("MyParameter"))
+            {
+                throw new Exception($"Report does not have subreport parameter.");
+            }
+
+            Console.WriteLine($"Analyzer test passed. Full output {reportAnalysis}.");
         }
 
         private static async Task CreatePdfFromReport(string reportPath, string pdfOutputPath, Data reportData)
@@ -120,6 +173,14 @@ namespace DotNetRunner
                 {
                     stream.CopyTo(fstreamOut);
                 }
+            }
+        }
+
+        private static async Task ReportStream(string reportPath, Func<Stream, Task> reportHandler)
+        {
+            using (var fstream = new FileStream(reportPath, FileMode.Open))
+            {
+                await reportHandler(fstream);
             }
         }
 
